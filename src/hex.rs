@@ -17,8 +17,6 @@ pub struct HexFormat<'s> {
 
 impl<'s> ByteFormat for HexFormat<'s> {
     fn fmt_bytes(&self, bytes: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
-        use std::fmt::Write;
-
         let mut written = false;
 
         for b in bytes {
@@ -32,9 +30,9 @@ impl<'s> ByteFormat for HexFormat<'s> {
                 write!(f, "{:02x}", b)?;
             }
 
+            written = true;
         }
 
         Ok(())
     }
 }
-

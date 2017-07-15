@@ -7,6 +7,7 @@
 
 use std::ascii::AsciiExt;
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::str;
 
 use std::fmt;
@@ -18,7 +19,7 @@ pub use hex::HexFormat;
 /// Prints byte sections as ` {{ 00 01 02 .. FD FE FF }} `.
 pub static DEFAULT_HEX: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
     delim: [" {{ ", " }} "],
-    ascii_only: false,
+    ascii_only: true,
     min_str_len: 4,
     byte_format: HexFormat {
         separator: " ",
@@ -84,19 +85,13 @@ impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
     }
 
     fn valid_subseq<'b>(&self, bytes: &'b [u8]) -> Option<(&'b str, &'b [u8])> {
-        match str::from_utf8(bytes) {
-            Ok(all_good) => Some((all_good, &[])),
-            Err(err) => {
-                let valid_end = err.valid_up_to();
-
-                if valid_end > self.min_str_len {
-                    unsafe {
-                        Some((str::from_utf8_unchecked(&bytes[..valid_end]), &bytes[valid_end..]))
-                    }
-                } else {
-                    None
-                }
-            }
+        match self.try_convert(bytes) {
+            Ok(all_good) if all_good.len() >= self.min_str_len => Some((all_good, &[])),
+            Err(valid_end) if valid_end >= self.min_str_len =>
+                unsafe {
+                    Some((str::from_utf8_unchecked(&bytes[..valid_end]), &bytes[valid_end..]))
+                },
+            _ => None,
         }
     }
 
@@ -120,6 +115,22 @@ impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
         }
     }
 
+    fn next_valid_subseq<'b>(&self, bytes: &'b [u8]) -> Option<(&'b [u8], &'b str, &'b [u8])> {
+        let mut start = 0;
+
+        while let Some(next_valid) = self.next_valid_idx(&bytes[start..]) {
+            start += next_valid;
+
+            if let Some((valid, after)) = self.valid_subseq(&bytes[start..]) {
+                return Some((&bytes[..start], valid, after));
+            }
+
+            start += 1;
+        }
+
+        None
+    }
+
     pub fn convert<'b>(&self, bytes: &'b [u8]) -> Cow<'b, str> {
         match self.try_convert(bytes) {
             Ok(s) => s.into(),
@@ -129,10 +140,10 @@ impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
         }
     }
 
-    pub fn display(&self, bytes: &[u8]) -> DisplayBytes<F> {
+    pub fn display<'b>(&'b self, bytes: &'b [u8]) -> DisplayBytes<'b, F> {
         DisplayBytes {
             bytes: bytes,
-            valid_end: None,
+            valid_end: Cell::new(None),
             config: self,
         }
     }
@@ -175,33 +186,25 @@ pub struct DisplayBytes<'b, F: 'b> {
 
 impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-
         let mut rem = if let Some(valid_end) = self.valid_end.get() {
             let (valid, rest) = self.bytes.split_at(valid_end);
             f.write_str(unsafe { str::from_utf8_unchecked(valid) })?;
-            rest
-        } else if let Some((valid, rest)) = self.config.valid_subseq(self.bytes) {
-            self.valid_end.set(Some(valid.len()));
             rest
         } else {
             self.bytes
         };
 
-        while rem.is_empty() {
-            if let Some((valid, rest)) = self.config.valid_subseq(rem) {
-                rem = rest;
-                f.write_str(valid)?;
-                continue;
-            }
-
-            let bytes_end = self.config.next_valid_idx(self.bytes).unwrap_or(rem.len());
-
-            let (bytes, rest) = self.bytes.split_at(bytes_end);
-
-            rem = rest;
-
+        while let Some((before, valid, after)) = self.config.next_valid_subseq(rem) {
             f.write_str(self.config.delim[0])?;
-            self.config.byte_format.fmt_bytes(bytes, f)?;
+            self.config.byte_format.fmt_bytes(before, f)?;
+            f.write_str(self.config.delim[1])?;
+            f.write_str(valid)?;
+            rem = after;
+        }
+
+        if !rem.is_empty() {
+            f.write_str(self.config.delim[0])?;
+            self.config.byte_format.fmt_bytes(rem, f)?;
             f.write_str(self.config.delim[1])?;
         }
 
@@ -209,7 +212,11 @@ impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     }
 }
 
+//
 #[test]
 fn basic_test() {
-    assert_eq!(bytes_to_str(b"\xF0o\xBAr"), " {{ F0 }} o {{ BA }} r")
+    assert_eq!(display_bytes_string(b"\xF0o\xBAr"), " {{ F0 6F BA 72 }} ");
+    assert_eq!(display_bytes_string(b"\xF0o\xBAr foobar \xAB\xCD\xEF"), " {{ F0 6F BA }} r foobar  {{ AB CD EF }} ");
 }
+
+
