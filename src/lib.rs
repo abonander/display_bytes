@@ -12,31 +12,27 @@ use std::str;
 
 use std::fmt;
 
+mod base64;
 mod hex;
 
-pub use hex::HexFormat;
+pub use base64::FormatBase64;
+pub use hex::{DEFAULT_HEX, FormatHex};
 
 /// Prints byte sections as ` {{ 00 01 02 .. FD FE FF }} `.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static HEX_ASCII: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
+pub static HEX_ASCII: DisplayConfig<'static, FormatHex<'static>> = DisplayConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 4,
-    byte_format: HexFormat {
-        separator: " ",
-        uppercase: true,
-    }
+    byte_format: DEFAULT_HEX,
 };
 
-pub static HEX_UTF8: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
+pub static HEX_UTF8: DisplayConfig<'static, FormatHex<'static>> = DisplayConfig {
     delim: [" {{ ", " }} "],
     ascii_only: false,
     min_str_len: 4,
-    byte_format: HexFormat {
-        separator: " ",
-        uppercase: true,
-    }
+    byte_format: DEFAULT_HEX
 };
 
 #[derive(Clone, Debug)]
@@ -47,7 +43,7 @@ pub struct DisplayConfig<'d, F: ?Sized> {
     byte_format: F
 }
 
-impl Default for DisplayConfig<'static, HexFormat<'static>> {
+impl Default for DisplayConfig<'static, FormatHex<'static>> {
     fn default() -> Self {
         HEX_ASCII.clone()
     }
@@ -159,6 +155,19 @@ impl<'d, F: ?Sized + ByteFormat> DisplayConfig<'d, F> {
 
 pub trait ByteFormat {
     fn fmt_bytes(&self, bytes: &[u8], f: &mut fmt::Formatter) -> fmt::Result;
+
+    #[cfg(test)]
+    fn bytes_to_string(&self, bytes: &[u8]) -> String {
+        struct DisplayAdapter<'a, F: ?Sized + 'a>(&'a [u8], &'a F);
+
+        impl<'a, F: ByteFormat + ?Sized + 'a> fmt::Display for DisplayAdapter<'a, F> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                self.1.fmt_bytes(self.0, f)
+            }
+        }
+
+        format!("{}", DisplayAdapter(bytes, self))
+    }
 }
 
 fn next_valid_idx(bytes: &[u8]) -> Option<usize> {

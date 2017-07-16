@@ -8,15 +8,20 @@ use super::ByteFormat;
 
 use std::fmt;
 
+pub const DEFAULT_HEX: FormatHex<'static> = FormatHex {
+    separator: " ",
+    uppercase: true,
+};
+
 #[derive(Copy, Clone, Debug)]
-pub struct HexFormat<'s> {
+pub struct FormatHex<'s> {
     /// The separator for individual hex-formatted bytes.
     pub separator: &'s str,
     /// Whether or not to write the hex-pairs in uppercase
     pub uppercase: bool,
 }
 
-impl<'s> ByteFormat for HexFormat<'s> {
+impl<'s> ByteFormat for FormatHex<'s> {
     fn fmt_bytes(&self, bytes: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
         let mut written = false;
 
@@ -26,9 +31,9 @@ impl<'s> ByteFormat for HexFormat<'s> {
             }
 
             if self.uppercase {
-                write!(f, "{:X}", b)?;
+                write!(f, "{:02X}", b)?;
             } else {
-                write!(f, "{:x}", b)?;
+                write!(f, "{:02x}", b)?;
             }
 
             written = true;
@@ -36,4 +41,9 @@ impl<'s> ByteFormat for HexFormat<'s> {
 
         Ok(())
     }
+}
+
+#[test]
+fn test_hex() {
+    assert_eq!(DEFAULT_HEX.bytes_to_string(b"\xAB\xCD\xEF\x00\x10"), "AB CD EF 00 10");
 }
