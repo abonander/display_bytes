@@ -17,7 +17,9 @@ mod hex;
 pub use hex::HexFormat;
 
 /// Prints byte sections as ` {{ 00 01 02 .. FD FE FF }} `.
-pub static DEFAULT_HEX: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
+///
+/// Provided as a static so it may be used by-reference.
+pub static HEX_ASCII: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 4,
@@ -27,27 +29,31 @@ pub static DEFAULT_HEX: DisplayConfig<'static, HexFormat<'static>> = DisplayConf
     }
 };
 
+pub static HEX_UTF8: DisplayConfig<'static, HexFormat<'static>> = DisplayConfig {
+    delim: [" {{ ", " }} "],
+    ascii_only: false,
+    min_str_len: 4,
+    byte_format: HexFormat {
+        separator: " ",
+        uppercase: true,
+    }
+};
+
 #[derive(Clone, Debug)]
-pub struct DisplayConfig<'d, F> {
+pub struct DisplayConfig<'d, F: ?Sized> {
     delim: [&'d str; 2],
     ascii_only: bool,
     min_str_len: usize,
     byte_format: F
 }
 
-impl DisplayConfig<'static, HexFormat<'static>> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 impl Default for DisplayConfig<'static, HexFormat<'static>> {
     fn default() -> Self {
-        DEFAULT_HEX.clone()
+        HEX_ASCII.clone()
     }
 }
 
-impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
+impl<'d, F> DisplayConfig<'d, F> {
     pub fn byte_format<F_: ByteFormat>(self, format: F_) -> DisplayConfig<'d, F_> {
         DisplayConfig {
             delim: self.delim,
@@ -77,13 +83,15 @@ impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
     }
 
     pub fn ascii_only(self, ascii_only: bool) -> Self {
-        DisplayConfig { ascii_only, .. self }
+        DisplayConfig { ascii_only, ..self }
     }
 
     pub fn min_str_len(self, min_str_len: usize) -> Self {
-        DisplayConfig { min_str_len, .. self}
+        DisplayConfig { min_str_len, ..self }
     }
+}
 
+impl<'d, F: ?Sized + ByteFormat> DisplayConfig<'d, F> {
     fn valid_subseq<'b>(&self, bytes: &'b [u8]) -> Option<(&'b str, &'b [u8])> {
         match self.try_convert(bytes) {
             Ok(all_good) if all_good.len() >= self.min_str_len => Some((all_good, &[])),
@@ -131,7 +139,7 @@ impl<'d, F> DisplayConfig<'d, F> where F: ByteFormat {
         None
     }
 
-    pub fn convert<'b>(&self, bytes: &'b [u8]) -> Cow<'b, str> {
+    pub fn bytes_to_string<'b>(&self, bytes: &'b [u8]) -> Cow<'b, str> where 'd: 'b, F: 'b {
         match self.try_convert(bytes) {
             Ok(s) => s.into(),
             Err(valid_end) => DisplayBytes {
@@ -171,22 +179,24 @@ fn starts_valid(bytes: &[u8]) -> bool {
 }
 
 pub fn display_bytes_string(bytes: &[u8]) -> Cow<str> {
-    DEFAULT_HEX.convert(bytes)
+    HEX_ASCII.bytes_to_string(bytes)
 }
 
-pub fn display_bytes(bytes: &[u8]) -> DisplayBytes<HexFormat<'static>> {
-    DEFAULT_HEX.display(bytes)
+pub fn display_bytes(bytes: &[u8]) -> DisplayBytes<ByteFormat> {
+    let hex_ascii: &DisplayConfig<ByteFormat> = &HEX_ASCII;
+    hex_ascii.display(bytes)
 }
 
-pub struct DisplayBytes<'b, F: 'b> {
+pub struct DisplayBytes<'b, F: ?Sized + 'b> {
     bytes: &'b [u8],
     valid_end: Cell<Option<usize>>,
     config: &'b DisplayConfig<'b, F>,
 }
 
-impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
+impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut rem = if let Some(valid_end) = self.valid_end.get() {
+            self.valid_end.set(Some(valid_end));
             let (valid, rest) = self.bytes.split_at(valid_end);
             f.write_str(unsafe { str::from_utf8_unchecked(valid) })?;
             rest
@@ -219,4 +229,7 @@ fn basic_test() {
     assert_eq!(display_bytes_string(b"\xF0o\xBAr foobar \xAB\xCD\xEF"), " {{ F0 6F BA }} r foobar  {{ AB CD EF }} ");
 }
 
+#[test]
+fn types_stable() {
 
+}

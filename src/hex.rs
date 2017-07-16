@@ -12,6 +12,7 @@ use std::fmt;
 pub struct HexFormat<'s> {
     /// The separator for individual hex-formatted bytes.
     pub separator: &'s str,
+    /// Whether or not to write the hex-pairs in uppercase
     pub uppercase: bool,
 }
 
@@ -25,9 +26,9 @@ impl<'s> ByteFormat for HexFormat<'s> {
             }
 
             if self.uppercase {
-                write!(f, "{:02X}", b)?;
+                write!(f, "{:X}", b)?;
             } else {
-                write!(f, "{:02x}", b)?;
+                write!(f, "{:x}", b)?;
             }
 
             written = true;
