@@ -10,7 +10,7 @@ use std::{fmt, mem, str};
 
 pub struct FormatBase64;
 
-const BASE64_CHARS: &[u8] = b"ABCDEFGHJIKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 const BUF_SIZE: usize = 1024;
 const CHUNK_SIZE: usize = BUF_SIZE / 4 * 3;
@@ -44,7 +44,7 @@ impl ByteFormat for FormatBase64 {
                     // Make sure all bytes are overwritten
                     buf[buf_len .. buf_full].copy_from_slice(&[b'='; 4]);
 
-                    encode_chunk(&chunk[divis_len..], &mut buf[buf_len .. buf_full]);
+                    encode_chunk_partial(&chunk[divis_len..], &mut buf[buf_len .. buf_full]);
 
                     f.write_str(unsafe { str::from_utf8_unchecked(&buf[..buf_full]) })?;
                 }
@@ -63,14 +63,14 @@ fn encode_chunk_full(chunk: &[u8], out: &mut [u8]) {
     // upper six bits of first byte
     out[0] = base64_byte(chunk[0] >> 2);
     // lower two bits of first byte, upper four of second
-    out[1] = base64_byte(chunk[0] << 4 & chunk[1] >> 4);
+    out[1] = base64_byte(chunk[0] << 4 | chunk[1] >> 4);
     // lower four of second, upper two of third
-    out[2] = base64_byte(chunk[1] << 2 & chunk[2] >> 6);
+    out[2] = base64_byte(chunk[1] << 2 | chunk[2] >> 6);
     // lower six bytes of third
     out[3] = base64_byte(chunk[2]);
 }
 
-fn encode_chunk<'o>(chunk: &[u8], out: &'o mut [u8]) {
+fn encode_chunk_partial<'o>(chunk: &[u8], out: &'o mut [u8]) {
     debug_assert!(chunk.len() == 1 || chunk.len() == 2, "chunk len: {}", chunk.len());
     debug_assert_eq!(out.len(), 4);
 
@@ -78,7 +78,7 @@ fn encode_chunk<'o>(chunk: &[u8], out: &'o mut [u8]) {
     out[0] = base64_byte(chunk[0] >> 2);
 
     if chunk.len() == 2 {
-        out[1] = base64_byte(chunk[0] << 4 & chunk[1] >> 4);
+        out[1] = base64_byte(chunk[0] << 4 | chunk[1] >> 4);
         out[2] = base64_byte(chunk[1] << 2);
     } else {
         out[1] = base64_byte(chunk[0] << 4);
@@ -92,8 +92,23 @@ fn base64_byte(c: u8) -> u8 {
 
 #[test]
 fn test_base64() {
+    // Lifted from https://en.wikipedia.org/wiki/Base64#Examples (Accessed July 16, 2017)
+    let mut out = [0; 4];
+    encode_chunk_full(b"Man", &mut out);
+    assert_eq!(out, *b"TWFu");
+
+    out = [b'='; 4];
+    encode_chunk_partial(b"Ma", &mut out);
+    assert_eq!(out, *b"TWE=");
+
+    out = [b'='; 4];
+    encode_chunk_partial(b"M", &mut out);
+    assert_eq!(out, *b"TQ==");
+
     assert_eq!(
         FormatBase64.bytes_to_string(&[69, 236, 43, 138, 215, 136, 180, 137, 209, 186, 203, 75, 208, 191, 190]),
         "RewriteItInRustL0L++"
     );
+
+
 }
