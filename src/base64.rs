@@ -8,6 +8,7 @@ use super::ByteFormat;
 
 use std::{fmt, mem, str};
 
+#[derive(Copy, Clone, Debug)]
 pub struct FormatBase64;
 
 const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

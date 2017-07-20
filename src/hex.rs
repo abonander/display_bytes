@@ -8,6 +8,7 @@ use super::ByteFormat;
 
 use std::fmt;
 
+/// Default hexidecimal byte format used by this crate.
 pub const DEFAULT_HEX: FormatHex<'static> = FormatHex {
     separator: " ",
     uppercase: true,

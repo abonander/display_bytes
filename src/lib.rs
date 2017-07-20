@@ -18,63 +18,71 @@ mod hex;
 pub use base64::FormatBase64;
 pub use hex::{DEFAULT_HEX, FormatHex};
 
-/// Prints byte sections with hexadecimal bytes. Prints only ASCII sequences as strings.
+/// Prints byte sections with hexadecimal bytes wrapped in ` {{ }} `. Prints only ASCII sequences.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static HEX_ASCII: DisplayConfig<'static, FormatHex<'static>> = DisplayConfig {
+pub static HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
-    min_str_len: 4,
+    min_str_len: 6,
     byte_format: DEFAULT_HEX,
 };
 
 /// Prints byte sections with hexadecimal bytes wrapped in ` {{ }} `. Prints all valid UTF-8 strings.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static HEX_UTF8: DisplayConfig<'static, FormatHex<'static>> = DisplayConfig {
+pub static HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: false,
-    min_str_len: 4,
+    min_str_len: 6,
     byte_format: DEFAULT_HEX
 };
 
-/// Prints byte sections as Base-64 wrapped in ` {{ }} `. Prints ASCII only.
+/// Prints byte sections as Base-64 wrapped in ` {{ }} `. Prints only ASCII sequences.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static BASE64_ASCII: DisplayConfig<'static, FormatBase64> = DisplayConfig {
+pub static BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
-    min_str_len: 4,
+    min_str_len: 6,
     byte_format: FormatBase64,
 };
 
 /// Prints byte sections as Base-64 wrapped in ` {{ }} `. Prints all valid UTF-8 strings.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static BASE64_UTF8: DisplayConfig<'static, FormatBase64> = DisplayConfig {
+pub static BASE64_UTF8: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: false,
-    min_str_len: 4,
+    min_str_len: 6,
     byte_format: FormatBase64,
 };
 
+/// Configuration builder for `DisplayBytes`.
+///
+/// Statics with sane defaults are provided in this module.
 #[derive(Clone, Debug)]
-pub struct DisplayConfig<'d, F: ?Sized> {
+pub struct DisplayBytesConfig<'d, F: ?Sized> {
     delim: [&'d str; 2],
     ascii_only: bool,
     min_str_len: usize,
     byte_format: F
 }
 
-impl Default for DisplayConfig<'static, FormatHex<'static>> {
+impl Default for DisplayBytesConfig<'static, FormatHex<'static>> {
     fn default() -> Self {
-        HEX_ASCII.clone()
+        HEX_UTF8.clone()
     }
 }
 
-impl<'d, F> DisplayConfig<'d, F> {
-    pub fn byte_format<F_: ByteFormat>(self, format: F_) -> DisplayConfig<'d, F_> {
-        DisplayConfig {
+impl Default for DisplayBytesConfig<'static, FormatBase64> {
+    fn default() -> Self { BASE64_UTF8.clone() }
+}
+
+impl<'d, F> DisplayBytesConfig<'d, F> {
+    /// Set the type used to format byte sequences.
+    pub fn byte_format<F_: ByteFormat>(self, format: F_) -> DisplayBytesConfig<'d, F_> {
+        DisplayBytesConfig {
             delim: self.delim,
             ascii_only: self.ascii_only,
             min_str_len: self.min_str_len,
@@ -82,8 +90,8 @@ impl<'d, F> DisplayConfig<'d, F> {
         }
     }
 
-    pub fn delimiters<'d_>(self, delimiters: [&'d_ str; 2]) -> DisplayConfig<'d_, F> {
-        DisplayConfig {
+    pub fn delimiters<'d_>(self, delimiters: [&'d_ str; 2]) -> DisplayBytesConfig<'d_, F> {
+        DisplayBytesConfig {
             delim: delimiters,
             ascii_only: self.ascii_only,
             min_str_len: self.min_str_len,
@@ -92,15 +100,15 @@ impl<'d, F> DisplayConfig<'d, F> {
     }
 
     pub fn ascii_only(self, ascii_only: bool) -> Self {
-        DisplayConfig { ascii_only, ..self }
+        DisplayBytesConfig { ascii_only, ..self }
     }
 
     pub fn min_str_len(self, min_str_len: usize) -> Self {
-        DisplayConfig { min_str_len, ..self }
+        DisplayBytesConfig { min_str_len, ..self }
     }
 }
 
-impl<'d, F: ?Sized + ByteFormat> DisplayConfig<'d, F> {
+impl<'d, F: ?Sized + ByteFormat> DisplayBytesConfig<'d, F> {
     fn valid_subseq<'b>(&self, bytes: &'b [u8]) -> Option<(&'b str, &'b [u8])> {
         match self.try_convert(bytes) {
             Ok(all_good) if all_good.len() >= self.min_str_len => Some((all_good, &[])),
@@ -203,30 +211,48 @@ fn starts_valid(bytes: &[u8]) -> bool {
     }
 }
 
+
+/// Attempt to convert the byte slice to a string, or else format it to a string using the default
+/// `DisplayBytesConfig`.
+///
+/// All string-decodable sequences of useful length will be displayed as they are, and all
+/// non-decodable byte sequences will be printed in a human-readable format.
+///
+/// The format is unspecified. If you want to specify a format, use `DisplayBytesConfig` directly
+/// or one of the statics in the crate root.
 pub fn display_bytes_string(bytes: &[u8]) -> Cow<str> {
-    HEX_ASCII.display_bytes_string(bytes)
+    HEX_UTF8.display_bytes_string(bytes)
 }
 
 /// Wrap a byte slice in an adapter which implements `Display`.
 ///
-/// This adapter will print any human-readable sequences of useful length in the byte stream.
+/// This adapter will print any string-decodable sequences of useful length in the byte stream,
+/// and all non-decodable byte sequences in a human-readable format.
 ///
 /// The format is deliberately unspecified in the type. If you want to specify a format, use
-/// `DisplayConfig` directly or one of the statics in the crate root.
+/// `DisplayBytesConfig` directly or one of the statics in the crate root.
 pub fn display_bytes(bytes: &[u8]) -> DisplayBytes<ByteFormat> {
-    let hex_ascii: &DisplayConfig<ByteFormat> = &HEX_ASCII;
+    let hex_ascii: &DisplayBytesConfig<ByteFormat> = &HEX_UTF8;
     hex_ascii.display_bytes(bytes)
 }
 
+#[derive(Debug)]
 pub struct DisplayBytes<'b, F: ?Sized + 'b> {
     bytes: &'b [u8],
     valid_end: Cell<Option<usize>>,
-    config: &'b DisplayConfig<'b, F>,
+    config: &'b DisplayBytesConfig<'b, F>,
+}
+
+impl<'b, F: ?Sized + 'b> Clone for DisplayBytes<'b, F> {
+    fn clone(&self) -> Self {
+        DisplayBytes { bytes: self.bytes, valid_end: self.valid_end.clone(), config: self.config }
+    }
 }
 
 impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut rem = if let Some(valid_end) = self.valid_end.get() {
+            // Memoize the first valid sequence of the bytes
             self.valid_end.set(Some(valid_end));
             let (valid, rest) = self.bytes.split_at(valid_end);
             f.write_str(unsafe { str::from_utf8_unchecked(valid) })?;
@@ -253,15 +279,9 @@ impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     }
 }
 
-//
 #[test]
 fn basic_test() {
     assert_eq!(display_bytes_string(b"Hello, world!"), "Hello, world!");
     assert_eq!(display_bytes_string(b"\xF0o\xBAr"), " {{ F0 6F BA 72 }} ");
     assert_eq!(display_bytes_string(b"\xF0o\xBAr foobar \xAB\xCD\xEF"), " {{ F0 6F BA }} r foobar  {{ AB CD EF }} ");
-}
-
-#[test]
-fn types_stable() {
-
 }
