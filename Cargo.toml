@@ -4,4 +4,7 @@ version = "0.1.0"
 authors = ["Austin Bonander <austin.bonander@gmail.com>"]
 license = "MIT OR Apache 2.0"
 
+description = "Human-readable display of byte sequences."
+repository = "https://github.com/abonander/display_bytes"
+
 [dependencies]
