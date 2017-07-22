@@ -8,6 +8,7 @@ use super::ByteFormat;
 
 use std::{fmt, mem, str};
 
+/// Formats byte sequences in Base-64.
 #[derive(Copy, Clone, Debug)]
 pub struct FormatBase64;
 
