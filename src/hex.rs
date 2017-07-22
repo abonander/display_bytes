@@ -8,14 +8,18 @@ use super::ByteFormat;
 
 use std::fmt;
 
-/// Default hexidecimal byte format used by this crate.
+/// Default hexadecimal byte format used by this crate.
 pub const DEFAULT_HEX: FormatHex<'static> = FormatHex {
+    prefix: "",
     separator: " ",
     uppercase: true,
 };
 
+/// Formats bytes in hexadecimal pairs (`00 - FF`).
 #[derive(Copy, Clone, Debug)]
 pub struct FormatHex<'s> {
+    /// The prefix, if any, for each byte.
+    pub prefix: &'s str,
     /// The separator for individual hex-formatted bytes.
     pub separator: &'s str,
     /// Whether or not to write the hex-pairs in uppercase
@@ -32,9 +36,9 @@ impl<'s> ByteFormat for FormatHex<'s> {
             }
 
             if self.uppercase {
-                write!(f, "{:02X}", b)?;
+                write!(f, "{}{:02X}", self.prefix, b)?;
             } else {
-                write!(f, "{:02x}", b)?;
+                write!(f, "{}{:02x}", self.prefix, b)?;
             }
 
             written = true;

@@ -6,9 +6,25 @@
 // copied, modified, or distributed except according to those terms.
 //! Human-readable display of byte sequences.
 //!
+//! Supports printing of both UTF-8 and ASCII-only sequences.
+//!
 //! For easy usage, see the free functions `display_bytes()` and `display_bytes_string()`
 //! in this crate. For more control over formatting, see the statics in this crate or build
 //! an instance of `DisplayBytesConfig` yourself.
+//!
+//! ```rust
+//! extern crate display_bytes;
+//! 
+//! use display_bytes::{display_bytes, display_bytes_string};
+//! 
+//! fn main() {
+//!     let bytes = b"Hello, world!\x89\x90\xAB\xCD";
+//!     println!("{:?}", bytes);
+//!     println!("{}", display_bytes(bytes));
+//!     assert_eq!(display_bytes_string(bytes),
+//!                "Hello, world! {{ 89 90 AB CD }} ");
+//! }
+//! ```
 #![warn(missing_docs)]
 use std::ascii::AsciiExt;
 use std::borrow::Cow;
@@ -27,10 +43,11 @@ pub use hex::{DEFAULT_HEX, FormatHex};
 ///
 /// Provided as a static so it may be used by-reference.
 pub static HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
-    delim: ["{{ ", " }}"],
+    delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 6,
-    print_terminators: true,
+    print_terms: false,
+    invert_delims: false,
     byte_format: DEFAULT_HEX,
 };
 
@@ -38,10 +55,11 @@ pub static HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayB
 ///
 /// Provided as a static so it may be used by-reference.
 pub static HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
-    delim: ["{{ ", " }}"],
+    delim: [" {{ ", " }} "],
     ascii_only: false,
     min_str_len: 6,
-    print_terminators: true,
+    print_terms: false,
+    invert_delims: false,
     byte_format: DEFAULT_HEX
 };
 
@@ -49,10 +67,11 @@ pub static HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBy
 ///
 /// Provided as a static so it may be used by-reference.
 pub static BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
-    delim: ["{{ ", " }}"],
+    delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 6,
-    print_terminators: true,
+    print_terms: false,
+    invert_delims: false,
     byte_format: FormatBase64,
 };
 
@@ -60,10 +79,11 @@ pub static BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayByte
 ///
 /// Provided as a static so it may be used by-reference.
 pub static BASE64_UTF8: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
-    delim: ["{{ ", " }}"],
+    delim: [" {{ ", " }} "],
     ascii_only: false,
     min_str_len: 6,
-    print_terminators: true,
+    print_terms: false,
+    invert_delims: false,
     byte_format: FormatBase64,
 };
 
@@ -75,7 +95,8 @@ pub struct DisplayBytesConfig<'d, F: ?Sized> {
     delim: [&'d str; 2],
     ascii_only: bool,
     min_str_len: usize,
-    print_terminators: bool,
+    print_terms: bool,
+    invert_delims: bool,
     byte_format: F
 }
 
@@ -96,30 +117,37 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
             delim: self.delim,
             ascii_only: self.ascii_only,
             min_str_len: self.min_str_len,
-            print_terminators: self.print_terminators,
+            print_terms: self.print_terms,
+            invert_delims: self.invert_delims,
             byte_format: format,
         }
     }
 
-    /// Get a mutable reference to the current byte format.
+    /// Get a mutable reference to the current `ByteFormat`.
     pub fn byte_format_mut(&mut self) -> &mut F {
         &mut self.byte_format
     }
 
     /// Set the pair of delimiters used to wrap byte sequences in the formatted stream.
     ///
-    /// Note that this can shorten the lifetime bound if needed.
+    /// Note that this can change the lifetime bound.
     pub fn delimiters<'d_>(self, delimiters: [&'d_ str; 2]) -> DisplayBytesConfig<'d_, F> {
         DisplayBytesConfig {
             delim: delimiters,
             ascii_only: self.ascii_only,
             min_str_len: self.min_str_len,
-            print_terminators: self.print_terminators,
+            print_terms: self.print_terms,
+            invert_delims: self.invert_delims,
             byte_format: self.byte_format
         }
     }
 
-    /// If set to `true`, only displays ASCII byte sequences (bytes in `[0x00, 0x7F)`).
+    /// Get a mutable reference to the current pair of delimiters.
+    pub fn delimiters_mut(&mut self) -> &mut [&'d str; 2] {
+        &mut self.delim
+    }
+
+    /// If set to `true`, only displays ASCII byte sequences (bytes in `[0x00, 0x7F]`).
     ///
     /// Otherwise, displays all valid UTF-8 sequences at least `min_str_len` bytes long.
     pub fn ascii_only(self, ascii_only: bool) -> Self {
@@ -135,15 +163,21 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
     /// ## Note
     /// This does not affect byte sequences that can be completely decoded. If `print_terminators`
     /// is set, this also will not affect strings at the beginning or at the end of the byte
-    /// sequence (e.g. valid strings at the start and end will be printed regardless of length).
+    /// slice (e.g. valid strings at the start and end will be printed regardless of length).
     pub fn min_str_len(self, min_str_len: usize) -> Self {
         DisplayBytesConfig { min_str_len, ..self }
     }
 
-    /// If set to `true`, valid strings at the start and end of a given byte sequence will
+    /// If set to `true`, valid strings at the start and end of a byte slice will
     /// be printed regardless of their length relative to `min_str_len`.
     pub fn print_terminators(self, print_terminators: bool) -> Self {
-        DisplayBytesConfig{ print_terminators, .. self }
+        DisplayBytesConfig{ print_terms: print_terminators, .. self }
+    }
+
+    /// If set to `true`, wraps decoded strings in the given delimiters
+    /// rather than byte sequences.
+    pub fn invert_delimiters(self, invert_delimiters: bool) -> Self {
+        DisplayBytesConfig { invert_delims: invert_delimiters, .. self }
     }
 }
 
@@ -186,7 +220,7 @@ impl<'d, F: ?Sized + ByteFormat> DisplayBytesConfig<'d, F> {
             if let Some((valid, after)) = self.valid_subseq(&bytes[start..]) {
                 // We handle this here so we don't need to do special handling of delimiters
                 // in `DisplayBytes::fmt()`
-                if valid.len() >= self.min_str_len || (after.is_empty() && self.print_terminators) {
+                if valid.len() >= self.min_str_len || (after.is_empty() && self.print_terms) {
                     return Some((&bytes[..start], valid, after));
                 }
             }
@@ -314,14 +348,24 @@ impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
 
         // We handle this here because this is the only time we *know* we're at the
         // start of the byte sequence
-        let accept_start = |s: &str| self.config.print_terminators ||
+        let accept_start = |s: &str| self.config.print_terms ||
                                         s.len() >= self.config.min_str_len;
 
         let mut rem = match maybe_valid {
             Some((valid, rem)) if accept_start(valid) => {
                 // Memoize the first valid sequence of the bytes
                 self.valid_end.set(Some(valid.len()));
+
+                if self.config.invert_delims {
+                    f.write_str(self.config.delim[0])?;
+                }
+
                 f.write_str(valid)?;
+
+                if self.config.invert_delims {
+                    f.write_str(self.config.delim[1])?;
+                }
+
                 rem
             },
             _ => {
@@ -332,18 +376,32 @@ impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
         };
 
         while let Some((before, valid, after)) = self.config.next_valid_subseq(rem) {
-            f.write_str(self.config.delim[0])?;
-            self.config.byte_format.fmt_bytes(before, f)?;
-            f.write_str(self.config.delim[1])?;
-            f.write_str(valid)?;
+            if !self.config.invert_delims {
+                f.write_str(self.config.delim[0])?;
+                self.config.byte_format.fmt_bytes(before, f)?;
+                f.write_str(self.config.delim[1])?;
+                f.write_str(valid)?;
+            } else {
+                self.config.byte_format.fmt_bytes(before, f)?;
+                f.write_str(self.config.delim[0])?;
+                f.write_str(valid)?;
+                f.write_str(self.config.delim[1])?;
+            }
+
 
             rem = after;
         }
 
         if !rem.is_empty() {
-            f.write_str(self.config.delim[0])?;
+            if !self.config.invert_delims {
+                f.write_str(self.config.delim[0])?;
+            }
+
             self.config.byte_format.fmt_bytes(rem, f)?;
-            f.write_str(self.config.delim[1])?;
+
+            if !self.config.invert_delims {
+                f.write_str(self.config.delim[1])?;
+            }
         }
 
         Ok(())
@@ -365,29 +423,41 @@ fn assume_utf8(bytes: &[u8]) -> &str {
 fn basic_test() {
     let format = &HEX_UTF8;
     assert_eq!(format.display_bytes_string(b"Hello, world!"), "Hello, world!");
-    assert_eq!(format.display_bytes_string(b"Hello,\xAB\xCD\xEF"), "Hello,{{ AB CD EF }}");
-    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr"), "{{ F0 6F BA 72 }}");
+    assert_eq!(format.display_bytes_string(b"Hello,\xAB\xCD\xEF"), "Hello, {{ AB CD EF }} ");
+    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr"), " {{ F0 6F BA 72 }} ");
     // test of `min_str_len`, note that the "r" at the end of `\xF0o\xBAr` is printed
     // because it is part of a string of valid length ("r foobar "), but the "o" between
     // 0xF0 and 0xBA is considered part of the byte sequence.
-    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr foobar \xAB\xCD\xEF"),
-               "{{ F0 6F BA }}r foobar {{ AB CD EF }}");
+    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr foobar\xAB\xCD\xEF"),
+               " {{ F0 6F BA }} r foobar {{ AB CD EF }} ");
 }
 
 #[test]
 fn test_memoization() {
     let display = HEX_UTF8.display_bytes(b"Hello,\xAB\xCD\xEF");
-    assert_eq!(display.to_string(), "Hello,{{ AB CD EF }}");
-    assert_eq!(display.to_string(), "Hello,{{ AB CD EF }}");
+    assert_eq!(display.to_string(), "Hello, {{ AB CD EF }} ");
+    assert_eq!(display.to_string(), "Hello, {{ AB CD EF }} ");
 }
 
 #[test]
 fn test_print_terminators() {
-    let bytes = b"ab \xCD \xEF gh";
-    let display = HEX_UTF8.display_bytes(bytes);
-    let config = HEX_UTF8.clone().print_terminators(false);
-    let display2 = config.display_bytes(bytes);
+    let bytes = b"ab\xCD \xEFgh";
+    let config = HEX_UTF8.clone().print_terminators(true);
+    let display = config.display_bytes(bytes);
+    let display2 = HEX_UTF8.display_bytes(bytes);
 
     assert_eq!(display.to_string(), "ab {{ CD 20 EF }} gh");
-    assert_eq!(display2.to_string(), "{{ 61 62 20 CD 20 EF 20 67 68 }}");
+    assert_eq!(display2.to_string(), " {{ 61 62 CD 20 EF 67 68 }} ");
+}
+
+#[test]
+fn test_invert_delims() {
+    let bytes = b"\x80\x90Hello, world!\xAB\xCD";
+    let config = HEX_UTF8.clone().invert_delimiters(true);
+
+    let display = config.display_bytes(bytes);
+    let display2 = HEX_UTF8.display_bytes(bytes);
+
+    assert_eq!(display.to_string(), "80 90 {{ Hello, world! }} AB CD");
+    assert_eq!(display2.to_string(), " {{ 80 90 }} Hello, world! {{ AB CD }} ")
 }
