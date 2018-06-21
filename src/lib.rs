@@ -26,12 +26,9 @@
 //! }
 //! ```
 #![warn(missing_docs)]
-use std::ascii::AsciiExt;
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::str;
-
-use std::fmt;
+use std::{fmt, ops, str};
 
 mod base64;
 mod hex;
@@ -39,26 +36,47 @@ mod hex;
 pub use base64::FormatBase64;
 pub use hex::{DEFAULT_HEX, FormatHex};
 
+#[derive(Clone, Debug)]
+enum MaybeOwned<'a, T: 'a> {
+    Borrowed(&'a T),
+    Owned(T),
+}
+
+impl<'a, T: 'a> ops::Deref for MaybeOwned<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        match *self {
+            MaybeOwned::Borrowed(b) => b,
+            MaybeOwned::Owned(ref o) => o,
+        }
+    }
+}
+
+impl<'a, T: 'a> From<&'a T> for MaybeOwned<'a, T> {
+    fn from(refr: &'a T) -> Self { MaybeOwned::Borrowed(refr) }
+}
+
+impl<'a, T: 'a> From<T> for MaybeOwned<'a, T> {
+    fn from(owned: T) -> Self { MaybeOwned::Owned(owned) }
+}
+
 /// Prints byte sections with hexadecimal bytes wrapped in ` {{ }} `. Prints only ASCII sequences.
-///
-/// Provided as a static so it may be used by-reference.
-pub static HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
+pub const HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 6,
-    print_terms: false,
+    print_terms: true,
     invert_delims: false,
     byte_format: DEFAULT_HEX,
 };
 
 /// Prints byte sections with hexadecimal bytes wrapped in ` {{ }} `. Prints all valid UTF-8 strings.
-///
-/// Provided as a static so it may be used by-reference.
-pub static HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
+pub const HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: false,
     min_str_len: 6,
-    print_terms: false,
+    print_terms: true,
     invert_delims: false,
     byte_format: DEFAULT_HEX
 };
@@ -66,32 +84,30 @@ pub static HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBy
 /// Prints byte sections as Base-64 wrapped in ` {{ }} `. Prints only ASCII sequences.
 ///
 /// Provided as a static so it may be used by-reference.
-pub static BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
+pub const BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: true,
     min_str_len: 6,
-    print_terms: false,
+    print_terms: true,
     invert_delims: false,
     byte_format: FormatBase64,
 };
 
 /// Prints byte sections as Base-64 wrapped in ` {{ }} `. Prints all valid UTF-8 strings.
-///
-/// Provided as a static so it may be used by-reference.
-pub static BASE64_UTF8: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
+pub const BASE64_UTF8: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesConfig {
     delim: [" {{ ", " }} "],
     ascii_only: false,
     min_str_len: 6,
-    print_terms: false,
+    print_terms: true,
     invert_delims: false,
     byte_format: FormatBase64,
 };
 
 /// Configuration builder for `DisplayBytes`.
 ///
-/// Statics with sane defaults are provided in this module.
+/// Consts with sane defaults are provided in this module.
 #[derive(Clone, Debug)]
-pub struct DisplayBytesConfig<'d, F: ?Sized> {
+pub struct DisplayBytesConfig<'d, F> {
     delim: [&'d str; 2],
     ascii_only: bool,
     min_str_len: usize,
@@ -181,7 +197,7 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
     }
 }
 
-impl<'d, F: ?Sized + ByteFormat> DisplayBytesConfig<'d, F> {
+impl<'d, F: ByteFormat> DisplayBytesConfig<'d, F> {
     fn valid_subseq<'b>(&self, bytes: &'b [u8]) -> Option<(&'b str, &'b [u8])> {
         match self.try_convert(bytes) {
             Ok(all_good) => Some((all_good, &[])),
@@ -205,7 +221,7 @@ impl<'d, F: ?Sized + ByteFormat> DisplayBytesConfig<'d, F> {
 
     fn next_valid_idx(&self, bytes: &[u8]) -> Option<usize> {
         if self.ascii_only {
-            bytes.iter().position(AsciiExt::is_ascii)
+            bytes.iter().position(u8::is_ascii)
         } else {
             next_valid_idx(bytes)
         }
@@ -238,18 +254,31 @@ impl<'d, F: ?Sized + ByteFormat> DisplayBytesConfig<'d, F> {
         match self.try_convert(bytes) {
             Ok(s) => s.into(),
             Err(valid_end) => DisplayBytes {
-                bytes: bytes, config: self, valid_end: Some(valid_end).into(),
+                bytes, config: self.into(), valid_end: Some(valid_end).into(),
             }.to_string().into(),
         }
     }
 
     /// Get a type that implements `Display` which will format `bytes` to an output stream
     /// using the properties in this configuration.
-    pub fn display_bytes<'b>(&'b self, bytes: &'b [u8]) -> DisplayBytes<'b, F> {
+    pub fn ref_display_bytes<'b>(&'b self, bytes: &'b [u8]) -> DisplayBytes<'b, F> {
         DisplayBytes {
-            bytes: bytes,
+            bytes,
             valid_end: Cell::new(None),
-            config: self,
+            config: self.into(),
+        }
+    }
+}
+
+
+impl<'d, F: ByteFormat> DisplayBytesConfig<'d, F> {
+    /// Get a type that implements `Display` which will format `bytes` to an output stream
+    /// using the properties in this configuration.
+    pub fn display_bytes<'b>(self, bytes: &'b [u8]) -> DisplayBytes<'b, F> where 'd: 'b {
+        DisplayBytes {
+            bytes,
+            valid_end: Cell::new(None),
+            config: self.into(),
         }
     }
 }
@@ -314,30 +343,22 @@ pub fn display_bytes_string(bytes: &[u8]) -> Cow<str> {
 ///
 /// The format is deliberately unspecified in the type. If you want to specify a format, use
 /// `DisplayBytesConfig` directly or one of the statics in the crate root.
-pub fn display_bytes(bytes: &[u8]) -> DisplayBytes<ByteFormat> {
-    let hex_ascii: &DisplayBytesConfig<ByteFormat> = &HEX_UTF8;
-    hex_ascii.display_bytes(bytes)
+pub fn display_bytes<'b>(bytes: &'b [u8]) -> impl fmt::Display + 'b {
+    HEX_ASCII.display_bytes(bytes)
 }
 
 /// A wrapper around a byte sequence which implements `Display`.
 ///
 /// Non-decodable byte sequences will be printed in human-readable representation based
-/// on the byte format `F`. Use `DisplayBytesConfig` or the free function `display_bytes()`
-/// in this crate to get an instance of this type.
+/// on the byte format `F`. Use `DisplayBytesConfig` to get an instance of this type.
 #[derive(Debug)]
-pub struct DisplayBytes<'b, F: ?Sized + 'b> {
+pub struct DisplayBytes<'b, F: 'b> {
     bytes: &'b [u8],
     valid_end: Cell<Option<usize>>,
-    config: &'b DisplayBytesConfig<'b, F>,
+    config: MaybeOwned<'b, DisplayBytesConfig<'b, F>>,
 }
 
-impl<'b, F: ?Sized + 'b> Clone for DisplayBytes<'b, F> {
-    fn clone(&self) -> Self {
-        DisplayBytes { bytes: self.bytes, valid_end: self.valid_end.clone(), config: self.config }
-    }
-}
-
-impl<'b, F: ?Sized + ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
+impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let maybe_valid = self.valid_end.get()
             .map(|valid_end| {
@@ -424,7 +445,7 @@ fn basic_test() {
     let format = &HEX_UTF8;
     assert_eq!(format.display_bytes_string(b"Hello, world!"), "Hello, world!");
     assert_eq!(format.display_bytes_string(b"Hello,\xAB\xCD\xEF"), "Hello, {{ AB CD EF }} ");
-    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr"), " {{ F0 6F BA 72 }} ");
+    assert_eq!(format.display_bytes_string(b"\xF0o\xBAr"), " {{ F0 6F BA }} r");
     // test of `min_str_len`, note that the "r" at the end of `\xF0o\xBAr` is printed
     // because it is part of a string of valid length ("r foobar "), but the "o" between
     // 0xF0 and 0xBA is considered part of the byte sequence.
@@ -442,9 +463,9 @@ fn test_memoization() {
 #[test]
 fn test_print_terminators() {
     let bytes = b"ab\xCD \xEFgh";
-    let config = HEX_UTF8.clone().print_terminators(true);
-    let display = config.display_bytes(bytes);
-    let display2 = HEX_UTF8.display_bytes(bytes);
+    let display = HEX_UTF8.display_bytes(bytes);
+    let config = HEX_UTF8.clone().print_terminators(false);
+    let display2 = config.display_bytes(bytes);
 
     assert_eq!(display.to_string(), "ab {{ CD 20 EF }} gh");
     assert_eq!(display2.to_string(), " {{ 61 62 CD 20 EF 67 68 }} ");
