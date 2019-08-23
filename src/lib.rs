@@ -35,6 +35,7 @@ mod hex;
 
 pub use base64::FormatBase64;
 pub use hex::{DEFAULT_HEX, FormatHex};
+use std::fmt::Write;
 
 #[derive(Clone, Debug)]
 enum MaybeOwned<'a, T: 'a> {
@@ -68,6 +69,7 @@ pub const HEX_ASCII: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayBy
     min_str_len: 6,
     print_terms: true,
     invert_delims: false,
+    escape_ctl: false,
     byte_format: DEFAULT_HEX,
 };
 
@@ -78,6 +80,7 @@ pub const HEX_UTF8: DisplayBytesConfig<'static, FormatHex<'static>> = DisplayByt
     min_str_len: 6,
     print_terms: true,
     invert_delims: false,
+    escape_ctl: false,
     byte_format: DEFAULT_HEX
 };
 
@@ -90,6 +93,7 @@ pub const BASE64_ASCII: DisplayBytesConfig<'static, FormatBase64> = DisplayBytes
     min_str_len: 6,
     print_terms: true,
     invert_delims: false,
+    escape_ctl: false,
     byte_format: FormatBase64,
 };
 
@@ -100,6 +104,7 @@ pub const BASE64_UTF8: DisplayBytesConfig<'static, FormatBase64> = DisplayBytesC
     min_str_len: 6,
     print_terms: true,
     invert_delims: false,
+    escape_ctl: false,
     byte_format: FormatBase64,
 };
 
@@ -113,6 +118,7 @@ pub struct DisplayBytesConfig<'d, F> {
     min_str_len: usize,
     print_terms: bool,
     invert_delims: bool,
+    escape_ctl: bool,
     byte_format: F
 }
 
@@ -135,6 +141,7 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
             min_str_len: self.min_str_len,
             print_terms: self.print_terms,
             invert_delims: self.invert_delims,
+            escape_ctl: self.escape_ctl,
             byte_format: format,
         }
     }
@@ -154,6 +161,7 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
             min_str_len: self.min_str_len,
             print_terms: self.print_terms,
             invert_delims: self.invert_delims,
+            escape_ctl: self.escape_ctl,
             byte_format: self.byte_format
         }
     }
@@ -188,6 +196,12 @@ impl<'d, F> DisplayBytesConfig<'d, F> {
     /// be printed regardless of their length relative to `min_str_len`.
     pub fn print_terminators(self, print_terminators: bool) -> Self {
         DisplayBytesConfig{ print_terms: print_terminators, .. self }
+    }
+
+    /// If set to `true`, control characters will be printed in their escaped form (`\n`)
+    /// instead of printed directly.
+    pub fn escape_control(self, escape_ctl: bool) -> Self {
+        DisplayBytesConfig{ escape_ctl, .. self }
     }
 
     /// If set to `true`, wraps decoded strings in the given delimiters
@@ -358,6 +372,26 @@ pub struct DisplayBytes<'b, F: 'b> {
     config: MaybeOwned<'b, DisplayBytesConfig<'b, F>>,
 }
 
+impl<'b, F> DisplayBytes<'b, F> {
+    fn maybe_escape(&self, str: &str, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.config.escape_ctl {
+            for c in str.chars() {
+                if c.is_ascii_control() {
+                    for c in c.escape_default() {
+                        f.write_char(c)?;
+                    }
+                } else {
+                    f.write_char(c)?;
+                }
+            }
+
+            Ok(())
+        } else {
+            f.write_str(str)
+        }
+    }
+}
+
 impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let maybe_valid = self.valid_end.get()
@@ -381,7 +415,7 @@ impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
                     f.write_str(self.config.delim[0])?;
                 }
 
-                f.write_str(valid)?;
+                self.maybe_escape(valid, f)?;
 
                 if self.config.invert_delims {
                     f.write_str(self.config.delim[1])?;
@@ -401,11 +435,11 @@ impl<'b, F: ByteFormat + 'b> fmt::Display for DisplayBytes<'b, F> {
                 f.write_str(self.config.delim[0])?;
                 self.config.byte_format.fmt_bytes(before, f)?;
                 f.write_str(self.config.delim[1])?;
-                f.write_str(valid)?;
+                self.maybe_escape(valid, f)?;
             } else {
                 self.config.byte_format.fmt_bytes(before, f)?;
                 f.write_str(self.config.delim[0])?;
-                f.write_str(valid)?;
+                self.maybe_escape(valid, f)?;
                 f.write_str(self.config.delim[1])?;
             }
 
